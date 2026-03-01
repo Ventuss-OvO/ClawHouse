@@ -12,13 +12,23 @@
     "prepublishOnly": "npm run build"
   },
   "openclaw": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
-  "keywords": ["openclaw", "plugin", "ios", "clawhouse"],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "ios",
+    "clawhouse"
+  ],
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "^22.0.0",
+    "eslint": "10.0.2",
     "typescript": "^5.4.0",
-    "vitest": "^2.0.0",
-    "@types/node": "^22.0.0"
+    "typescript-eslint": "8.56.1",
+    "vitest": "^2.0.0"
   }
 }
