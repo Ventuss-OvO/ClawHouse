@@ -1,0 +1,24 @@
+{
+  "name": "openclaw-plugin-clawhouse",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin that enables ClawHouse iOS app to connect as a Gateway channel",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "prepublishOnly": "npm run build"
+  },
+  "openclaw": {
+    "extensions": ["./src/index.ts"]
+  },
+  "keywords": ["openclaw", "plugin", "ios", "clawhouse"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
