@@ -4,6 +4,14 @@
   "description": "OpenClaw plugin that enables ClawHouse iOS app to connect as a Gateway channel",
   "type": "module",
   "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ventuss-OvO/ClawHouse"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
