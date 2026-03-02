@@ -510,6 +510,31 @@ describe('register (index.ts)', () => {
       expect(calls[0].payload.error.code).toBe('MISSING_DEVICE_ID');
     });
 
+    it('should succeed in relay mode (connection is null) without adding client', () => {
+      pairDevice('relay-sub-device');
+
+      const handler = mock.getGatewayMethod('clawhouse.subscribe');
+      const { fn, calls } = makeRespond();
+
+      // In relay mode, onInboundRPC passes connection: null
+      handler({
+        params: { deviceId: 'relay-sub-device', deviceName: 'Test iPhone' },
+        connection: null,
+        respond: fn,
+      });
+
+      expect(calls[0].ok).toBe(true);
+      expect(calls[0].payload.success).toBe(true);
+      expect(calls[0].payload.currentState).toBe('idle');
+
+      // Verify NO client was added (relay virtual client handles events)
+      const clientsHandler = mock.getGatewayMethod('clawhouse.clients');
+      const { fn: cFn, calls: cCalls } = makeRespond();
+      clientsHandler({ respond: cFn });
+      const found = cCalls[0].payload.clients.some((c: any) => c.deviceId === 'relay-sub-device');
+      expect(found).toBe(false);
+    });
+
     it('should wrap events using connection.send with Gateway framing', () => {
       pairDevice('frame-test-device');
 

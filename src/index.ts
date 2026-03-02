@@ -59,11 +59,14 @@ export default function register(api: any) {
   // Register inbound pre-processing (no-op for now, wires future hooks)
   setupInboundHandler(api);
 
+  // Store RPC handlers for relay dispatch
+  const rpcHandlers = new Map<string, (ctx: any) => void | Promise<void>>();
+
   // ---------------------------------------------------------------------------
   // Gateway RPC: clawhouse.pair
   // ---------------------------------------------------------------------------
 
-  api.registerGatewayMethod('clawhouse.pair', ({ params, respond }: any) => {
+  const handlePair = ({ params, respond }: any) => {
     const { token, deviceId, deviceName, platform, appVersion } = params ?? {};
 
     // --- Validate required fields ---
@@ -116,14 +119,17 @@ export default function register(api: any) {
       agentId: 'main',
       pairedAt: pairedDevice.pairedAt,
     });
-  });
+  };
+
+  api.registerGatewayMethod('clawhouse.pair', handlePair);
+  rpcHandlers.set('clawhouse.pair', handlePair);
 
   // ---------------------------------------------------------------------------
   // Gateway RPC: clawhouse.subscribe
   // iOS app calls this after pairing to register for event broadcasting.
   // ---------------------------------------------------------------------------
 
-  api.registerGatewayMethod('clawhouse.subscribe', ({ params, connection, respond }: any) => {
+  const handleSubscribe = ({ params, connection, respond }: any) => {
     const { deviceId, deviceName } = (params ?? {}) as SubscribeParams;
 
     if (!deviceId || typeof deviceId !== 'string') {
@@ -150,44 +156,46 @@ export default function register(api: any) {
     // Update lastSeenAt
     storage.updatePairedDevice(deviceId, { lastSeenAt: Date.now(), deviceName });
 
-    // Build the client entry — `connection.send` is provided by the Gateway
-    // for writing frames back over the active WebSocket.
-    const client: ConnectedClient = {
-      deviceId,
-      deviceName,
-      connectedAt: Date.now(),
-      send: (event) => {
-        // Wrap the ClawHouseEvent as a Gateway event frame so Protocol 3
-        // framing is preserved on the wire.
-        if (connection && typeof connection.send === 'function') {
+    // In direct mode, create a client entry using the Gateway connection.
+    // In relay mode (connection is null), the virtual client already handles
+    // event delivery — skip creating a duplicate client.
+    if (connection && typeof connection.send === 'function') {
+      const client: ConnectedClient = {
+        deviceId,
+        deviceName,
+        connectedAt: Date.now(),
+        send: (event) => {
           connection.send({
             type: 'event',
             event: `clawhouse.${event.type}`,
             payload: event.payload,
             seq: event.seq,
           });
-        }
-      },
-    };
+        },
+      };
 
-    addClient(client);
+      addClient(client);
+    }
 
     const response: SubscribeResponse = {
       success: true,
       currentState: getCurrentState(),
-      connectedAt: client.connectedAt,
+      connectedAt: Date.now(),
     };
 
     api.logger.info(`[ClawHouse] Device subscribed: ${deviceName} (${deviceId})`);
     respond(true, response);
-  });
+  };
+
+  api.registerGatewayMethod('clawhouse.subscribe', handleSubscribe);
+  rpcHandlers.set('clawhouse.subscribe', handleSubscribe);
 
   // ---------------------------------------------------------------------------
   // Gateway RPC: clawhouse.unsubscribe
   // iOS app calls this on graceful disconnect.
   // ---------------------------------------------------------------------------
 
-  api.registerGatewayMethod('clawhouse.unsubscribe', ({ params, respond }: any) => {
+  const handleUnsubscribe = ({ params, respond }: any) => {
     const { deviceId } = (params ?? {}) as UnsubscribeParams;
 
     if (!deviceId || typeof deviceId !== 'string') {
@@ -202,14 +210,17 @@ export default function register(api: any) {
 
     const response: UnsubscribeResponse = { success: true };
     respond(true, response);
-  });
+  };
+
+  api.registerGatewayMethod('clawhouse.unsubscribe', handleUnsubscribe);
+  rpcHandlers.set('clawhouse.unsubscribe', handleUnsubscribe);
 
   // ---------------------------------------------------------------------------
   // Gateway RPC: clawhouse.registerPushToken
   // iOS app calls this after connection to register/update its APNs push token.
   // ---------------------------------------------------------------------------
 
-  api.registerGatewayMethod('clawhouse.registerPushToken', ({ params, respond }: any) => {
+  const handleRegisterPushToken = ({ params, respond }: any) => {
     const { deviceId, pushToken, pushBundleId, pushEnvironment } = params ?? {};
 
     if (!deviceId || typeof deviceId !== 'string') {
@@ -234,32 +245,36 @@ export default function register(api: any) {
 
     api.logger.info(`[ClawHouse] Push token registered for device ${deviceId}`);
     respond(true, { success: true });
-  });
+  };
+
+  api.registerGatewayMethod('clawhouse.registerPushToken', handleRegisterPushToken);
+  rpcHandlers.set('clawhouse.registerPushToken', handleRegisterPushToken);
 
   // ---------------------------------------------------------------------------
   // Gateway RPC: clawhouse.state
   // ---------------------------------------------------------------------------
 
-  api.registerGatewayMethod('clawhouse.state', ({ respond }: any) => {
+  const handleState = ({ respond }: any) => {
     respond(true, {
       state: getCurrentState(),
       timestamp: Date.now(),
     });
-  });
+  };
+
+  api.registerGatewayMethod('clawhouse.state', handleState);
+  rpcHandlers.set('clawhouse.state', handleState);
 
   // ---------------------------------------------------------------------------
   // Gateway RPC: clawhouse.sessions
   // Proxy for sessions.list that enriches each session with channel metadata.
   // ---------------------------------------------------------------------------
 
-  api.registerGatewayMethod('clawhouse.sessions', async ({ params, respond }: any) => {
+  const handleSessions = async ({ params, respond }: any) => {
     try {
       // Delegate to the built-in sessions.list method
       const result: unknown = await api.callMethod('sessions.list', params ?? {});
 
       // Enrich each session entry with channelSource info.
-      // Gateway's sessions.list returns objects with `id`; use type assertion
-      // because the spread of an untyped response can't be statically verified.
       let sessions: SessionInfo[] = [];
       const raw: unknown[] = Array.isArray(result)
         ? result
@@ -277,14 +292,17 @@ export default function register(api: any) {
       const message = err instanceof Error ? err.message : String(err);
       respond(false, { error: { code: 'SESSIONS_ERROR', message } });
     }
-  });
+  };
+
+  api.registerGatewayMethod('clawhouse.sessions', handleSessions);
+  rpcHandlers.set('clawhouse.sessions', handleSessions);
 
   // ---------------------------------------------------------------------------
   // Gateway RPC: clawhouse.clients
   // Diagnostic endpoint — list currently connected iOS clients.
   // ---------------------------------------------------------------------------
 
-  api.registerGatewayMethod('clawhouse.clients', ({ respond }: any) => {
+  const handleClients = ({ respond }: any) => {
     const clients = Array.from(getConnectedClients().values()).map((c) => ({
       deviceId: c.deviceId,
       deviceName: c.deviceName,
@@ -292,7 +310,10 @@ export default function register(api: any) {
     }));
 
     respond(true, { clients, count: clients.length });
-  });
+  };
+
+  api.registerGatewayMethod('clawhouse.clients', handleClients);
+  rpcHandlers.set('clawhouse.clients', handleClients);
 
   // ---------------------------------------------------------------------------
   // Relay mode (outbound connection to relay service)
@@ -315,25 +336,26 @@ export default function register(api: any) {
     };
 
     // Handle inbound RPC from iOS app via relay
-    relayConnection.onInboundRPC = (method: string, params: unknown, respond: (ok: boolean, payload: unknown) => void) => {
-      // Dispatch to registered Gateway methods by simulating the method call
-      // The relay is transparent — same RPC methods work
+    relayConnection.onInboundRPC = async (method: string, params: unknown, respond: (ok: boolean, payload: unknown) => void) => {
       const handler = rpcHandlers.get(method);
       if (handler) {
-        handler({ params, respond, connection: { send: (frame: unknown) => {
-          // For subscribe, the connection.send is used to create the client's send function
-          // In relay mode, the virtual client handles this
-        }}});
+        // Dispatch clawhouse.* methods to local handlers.
+        // Pass connection as null so subscribe skips creating a duplicate client.
+        await handler({ params, respond, connection: null });
       } else {
-        respond(false, { code: 'METHOD_NOT_FOUND', message: `Unknown method: ${method}` });
+        // Forward Gateway built-in methods (chat.send, chat.history, sessions.list, etc.)
+        try {
+          const result = await api.callMethod(method, params ?? {});
+          respond(true, result);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          respond(false, { code: 'RPC_ERROR', message });
+        }
       }
     };
 
     api.logger.info(`[ClawHouse] Relay mode configured: ${relayConfig.url}`);
   }
-
-  // Store RPC handlers for relay dispatch
-  const rpcHandlers = new Map<string, (ctx: any) => void>();
 
   // ---------------------------------------------------------------------------
   // Background service
