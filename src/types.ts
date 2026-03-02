@@ -125,6 +125,12 @@ export interface APNsConfig {
   keyPath: string;
 }
 
+// Relay configuration
+export interface RelayConfig {
+  url: string;   // wss://relay.clawhouse.dev/gateway/connect
+  token: string; // relay_token from device registration
+}
+
 // Sessions proxy types
 export interface SessionInfo {
   id: string;

@@ -3,6 +3,7 @@ import { registerAgentHooks } from './hooks.js';
 import { setupInboundHandler } from './inbound.js';
 import { PluginStorage } from './storage.js';
 import { APNsSender } from './push.js';
+import { RelayConnection } from './relay.js';
 import type {
   SubscribeParams,
   SubscribeResponse,
@@ -12,6 +13,7 @@ import type {
   PairedDevice,
   SessionInfo,
   APNsConfig,
+  RelayConfig,
 } from './types.js';
 
 export default function register(api: any) {
@@ -293,6 +295,47 @@ export default function register(api: any) {
   });
 
   // ---------------------------------------------------------------------------
+  // Relay mode (outbound connection to relay service)
+  // ---------------------------------------------------------------------------
+
+  let relayConnection: RelayConnection | null = null;
+  const relayConfig: RelayConfig | undefined = api.config?.relay;
+
+  if (relayConfig?.url && relayConfig?.token) {
+    relayConnection = new RelayConnection(relayConfig, api.logger);
+
+    relayConnection.onVirtualClientReady = (client: ConnectedClient) => {
+      addClient(client);
+      api.logger.info('[ClawHouse] Relay virtual client connected');
+    };
+
+    relayConnection.onVirtualClientGone = (deviceId: string) => {
+      removeClient(deviceId);
+      api.logger.info('[ClawHouse] Relay virtual client disconnected');
+    };
+
+    // Handle inbound RPC from iOS app via relay
+    relayConnection.onInboundRPC = (method: string, params: unknown, respond: (ok: boolean, payload: unknown) => void) => {
+      // Dispatch to registered Gateway methods by simulating the method call
+      // The relay is transparent — same RPC methods work
+      const handler = rpcHandlers.get(method);
+      if (handler) {
+        handler({ params, respond, connection: { send: (frame: unknown) => {
+          // For subscribe, the connection.send is used to create the client's send function
+          // In relay mode, the virtual client handles this
+        }}});
+      } else {
+        respond(false, { code: 'METHOD_NOT_FOUND', message: `Unknown method: ${method}` });
+      }
+    };
+
+    api.logger.info(`[ClawHouse] Relay mode configured: ${relayConfig.url}`);
+  }
+
+  // Store RPC handlers for relay dispatch
+  const rpcHandlers = new Map<string, (ctx: any) => void>();
+
+  // ---------------------------------------------------------------------------
   // Background service
   // ---------------------------------------------------------------------------
 
@@ -306,9 +349,21 @@ export default function register(api: any) {
       if (paired.length > 0) {
         api.logger.info(`[ClawHouse] ${paired.length} previously paired device(s) loaded`);
       }
+
+      // Start relay connection if configured
+      if (relayConnection) {
+        relayConnection.start();
+        api.logger.info('[ClawHouse] Relay connection started');
+      }
     },
     stop: () => {
       api.logger.info('[ClawHouse] Background service stopped');
+
+      // Stop relay connection
+      if (relayConnection) {
+        relayConnection.stop();
+        api.logger.info('[ClawHouse] Relay connection stopped');
+      }
     },
   });
 
